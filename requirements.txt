@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+rembg==2.0.75
+Pillow==12.1.0
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pydantic==2.10.0
+pydantic-settings==2.7.0
+aiofiles==24.1.0
