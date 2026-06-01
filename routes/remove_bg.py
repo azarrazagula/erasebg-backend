@@ -1,9 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, status
 from fastapi.responses import StreamingResponse
 import io
+import time
 import logging
 
-from services.bg_service import BackgroundRemovalService
+from services.bg_service import BackgroundRemovalService, PerformanceTracker
 from utils.file_helper import validate_file, get_file_bytes, FileValidationError
 
 
@@ -47,8 +48,9 @@ async def remove_background(
             detail="Failed to read uploaded file"
         )
     
+    api_start = time.perf_counter()
     try:
-        result_bytes = await BackgroundRemovalService.remove_background(image_bytes)
+        result_bytes, processing_time = await BackgroundRemovalService.remove_background(image_bytes)
     except ValueError as e:
         logger.error(f"Background removal failed: {str(e)}")
         raise HTTPException(
@@ -61,7 +63,12 @@ async def remove_background(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while processing the image"
         )
-    
+
+    api_time = time.perf_counter() - api_start
+    print(f"[API] Total Request Time: {api_time:.2f}s")
+
+    PerformanceTracker().record(processing_time, api_time)
+
     return StreamingResponse(
         iter([result_bytes]),
         media_type="image/png",

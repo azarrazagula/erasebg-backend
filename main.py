@@ -4,22 +4,9 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config import settings
 from routes.remove_bg import router as bg_router
-
-
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    frontend_url: str = "http://localhost:3000"
-    max_file_size: int = 12582912
-    allowed_extensions: str = "png,jpg,jpeg,webp"
-    log_level: str = "INFO"
-    
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
-
-
-settings = Settings()
 
 
 logging.basicConfig(
