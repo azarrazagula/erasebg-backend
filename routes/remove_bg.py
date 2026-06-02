@@ -4,7 +4,7 @@ import io
 import time
 import logging
 
-from services.bg_service import BackgroundRemovalService, PerformanceTracker
+from services.main_bg_service import BackgroundRemovalService, PerformanceTracker
 from utils.file_helper import validate_file, get_file_bytes, FileValidationError
 
 
