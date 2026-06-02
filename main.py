@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from routes.remove_bg import router as bg_router
+from services.model_manager import ModelManager
 
 
 logging.basicConfig(
@@ -25,13 +27,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"Frontend URL: {settings.frontend_url}")
     logger.info(f"Max file size: {settings.max_file_size / (1024 * 1024):.1f}MB")
     logger.info(f"Allowed extensions: {settings.allowed_extensions}")
+    
+    if settings.preload_models_on_startup:
+        logger.info("Preloading BiRefNet models...")
+        mm = ModelManager()
+        # preload_all blocks, but that's fine/intended during lifespan startup
+        await asyncio.to_thread(mm.preload_all)
+        logger.info("Models ready. Server accepting requests.")
+    
     yield
     logger.info("Application shutting down...")
 
 
 app = FastAPI(
     title="Erasebg Backend",
-    description="AI Background Removal API powered by rembg",
+    description="AI Background Removal API powered by BiRefNet",
     version="1.0.0",
     lifespan=lifespan
 )
