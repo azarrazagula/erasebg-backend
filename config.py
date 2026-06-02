@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     graphic_color_threshold: float = 15.0
     graphic_edge_threshold: float = 0.05
 
+    # Redesigned Routing Parameters
+    robust_skin_sat_cap: float = 170.0         # Max saturation in HSV for skin to filter neon/graphics
+    text_count_threshold: int = 3              # Count of word-like blocks to classify as ROUTE_GRAPHIC
+    product_contour_ratio_min: float = 0.12    # Area ratio of largest contour for standalone objects/products
+    architecture_edge_density_min: float = 0.06 # Minimum edge density for temples/architecture
+    architecture_dispersion_max: float = 0.11   # Max standard dev of edge dispersion (spread edges across frame)
+    robust_skin_threshold: float = 0.04        # Minimal robust skin ratio fallback for portraits without a face
+
+
     # ── SAM2 (disabled by default — 18-25s on MPS, not viable for production) ─
     # Set sam2_disabled=False via env to re-enable for ?quality=high requests.
     sam2_disabled: bool = True

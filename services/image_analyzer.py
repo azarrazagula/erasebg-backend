@@ -79,6 +79,55 @@ class GraphicAssetDetector:
         return float(min(100.0, max(0.0, score)))
 
 
+class TextAssetDetector:
+    @staticmethod
+    def detect(cv_img: np.ndarray) -> int:
+        """
+        Count word-like horizontal text blocks in the image.
+        Uses lightweight morphological text detection.
+        """
+        # Convert to grayscale
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        
+        # Sobel X to detect vertical edges (highly characteristic of characters)
+        sobelx = cv2.Sobel(gray, cv2.CV_8U, 1, 0, ksize=3)
+        
+        # Threshold
+        _, thresh = cv2.threshold(sobelx, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Morphological closing with a horizontal rectangular kernel to connect characters/words
+        h, w = thresh.shape[:2]
+        k_width = max(5, int(w * 0.0375))   # e.g., 15 for 400px
+        k_height = max(1, int(h * 0.0075))  # e.g., 3 for 400px
+        
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_width, k_height))
+        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        text_contours_count = 0
+        for c in contours:
+            x, y, cw, ch = cv2.boundingRect(c)
+            aspect_ratio = cw / float(ch) if ch > 0 else 0.0
+            area = cw * ch
+            
+            # Word block filters:
+            # - Horizontal aspect ratio (longer than tall)
+            # - Height is readable but not full screen
+            # - Width is substantial but not full screen
+            # - Area is substantial but not full screen
+            if (
+                aspect_ratio > 1.2 
+                and 6 < ch < (h * 0.2) 
+                and cw > (w * 0.03) 
+                and 40 < area < (w * h * 0.1)
+            ):
+                text_contours_count += 1
+                
+        return text_contours_count
+
+
 class ImageAnalyzer:
     """
     Analyze an image and return routing metrics.
@@ -110,17 +159,49 @@ class ImageAnalyzer:
         sh, sw = cv_img.shape[:2]
         aspect_ratio = sw / sh if sh > 0 else 1.0
 
-        # ── Skin ratio (HSV range) ─────────────────────────────────────────
+        # ── Robust Skin ratio (HSV + YCrCb) ─────────────────────────────────
         hsv = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
-        lower_skin = np.array([0, 20, 70], dtype=np.uint8)
-        upper_skin = np.array([20, 255, 255], dtype=np.uint8)
-        skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
-        skin_ratio = cv2.countNonZero(skin_mask) / (sw * sh)
+        lower_skin_hsv = np.array([0, 20, 70], dtype=np.uint8)
+        # Cap saturation to filter out neon/graphic colors
+        upper_skin_hsv = np.array([20, int(settings.robust_skin_sat_cap), 255], dtype=np.uint8)
+        skin_mask_hsv = cv2.inRange(hsv, lower_skin_hsv, upper_skin_hsv)
+
+        ycrcb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2YCrCb)
+        lower_skin_ycrcb = np.array([0, 133, 77], dtype=np.uint8)
+        upper_skin_ycrcb = np.array([255, 173, 127], dtype=np.uint8)
+        skin_mask_ycrcb = cv2.inRange(ycrcb, lower_skin_ycrcb, upper_skin_ycrcb)
+
+        skin_mask_robust = cv2.bitwise_and(skin_mask_hsv, skin_mask_ycrcb)
+        skin_ratio_robust = cv2.countNonZero(skin_mask_robust) / (sw * sh) if (sw * sh) > 0 else 0.0
+
+        # Raw HSV skin ratio for compatibility/comparison
+        skin_mask_raw = cv2.inRange(hsv, np.array([0, 20, 70], dtype=np.uint8), np.array([20, 255, 255], dtype=np.uint8))
+        skin_ratio_raw = cv2.countNonZero(skin_mask_raw) / (sw * sh) if (sw * sh) > 0 else 0.0
 
         # ── Edge density (Canny) ───────────────────────────────────────────
         gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 100, 200)
-        edge_density = cv2.countNonZero(edges) / (sw * sh)
+        edge_density = cv2.countNonZero(edges) / (sw * sh) if (sw * sh) > 0 else 0.0
+
+        # ── Edge Dispersion Standard Deviation ─────────────────────────────
+        cell_h = sh // 4
+        cell_w = sw // 4
+        cell_densities = []
+        for row in range(4):
+            for col in range(4):
+                cell = edges[row * cell_h : (row + 1) * cell_h, col * cell_w : (col + 1) * cell_w]
+                cell_density = cv2.countNonZero(cell) / (cell_h * cell_w) if (cell_h * cell_w) > 0 else 0.0
+                cell_densities.append(cell_density)
+        edge_dispersion_std = float(np.std(cell_densities)) if cell_densities else 0.0
+
+        # ── Largest Contour Ratio & Contour Count ──────────────────────────
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        largest_contour_ratio = 0.0
+        contour_count = len(contours)
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            largest_contour_area = cv2.contourArea(largest_contour)
+            largest_contour_ratio = largest_contour_area / (sw * sh) if (sw * sh) > 0 else 0.0
 
         # ── Contrast & Brightness ──────────────────────────────────────────
         brightness = float(np.mean(gray))
@@ -134,26 +215,29 @@ class ImageAnalyzer:
         coverage = 0.5
         if coords is not None:
             x, y, ew, eh = cv2.boundingRect(coords)
-            coverage = (ew * eh) / (sw * sh)
+            coverage = (ew * eh) / (sw * sh) if (sw * sh) > 0 else 0.0
 
         # ── Graphic score ──────────────────────────────────────────────────
-        # GraphicAssetDetector already downscales internally, but since we
-        # already have cv_img at 400px, pass it directly to avoid double work.
         graphic_score = GraphicAssetDetector.detect(cv_img)
+
+        # ── Text Detection ─────────────────────────────────────────────────
+        text_count = TextAssetDetector.detect(cv_img)
 
         # ── Face detection (Haar cascade on 400px thumbnail) ───────────────
         face_detected = FaceDetector.detect(cv_img)
 
-        # Guard against Haar false positives: require minimum skin presence.
-        if face_detected and skin_ratio < settings.face_skin_floor:
+        # Guard against Haar false positives: require minimum robust skin presence.
+        if face_detected and skin_ratio_robust < settings.face_skin_floor:
             print(
-                f"[Analyze] Face detected but skin_ratio ({skin_ratio:.4f}) "
+                f"[Analyze] Face detected but skin_ratio_robust ({skin_ratio_robust:.4f}) "
                 f"below floor ({settings.face_skin_floor}) — ignoring face"
             )
             face_detected = False
 
         metrics = {
-            "skin_ratio": skin_ratio,
+            "skin_ratio": skin_ratio_robust,  # Backward compatibility: set skin_ratio to robust
+            "skin_ratio_raw": skin_ratio_raw,
+            "skin_ratio_robust": skin_ratio_robust,
             "brightness": brightness,
             "contrast": contrast,
             "aspect_ratio": aspect_ratio,
@@ -162,6 +246,10 @@ class ImageAnalyzer:
             "coverage": coverage,
             "graphic_score": graphic_score,
             "face_detected": face_detected,
+            "text_count": text_count,
+            "edge_dispersion_std": edge_dispersion_std,
+            "largest_contour_ratio": largest_contour_ratio,
+            "contour_count": contour_count,
         }
         print(f"[Analyze] Metrics: {metrics}")
         return metrics

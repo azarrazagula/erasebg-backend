@@ -3,55 +3,108 @@ from config import settings
 
 class SmartRouter:
     """
-    Route images to the optimal BiRefNet model based on analysis metrics.
+    Route images to the optimal BiRefNet model based on robust analysis metrics.
 
-    Priority order:
-      1. face_detected            → ROUTE_PORTRAIT  (strongest, fastest signal)
-      2. skin_ratio > 0.35        → ROUTE_PORTRAIT  (definitive human)
-      3. graphic_confidence > thr  → ROUTE_GRAPHIC
-      4. skin_ratio > 0.06        → ROUTE_PORTRAIT  (moderate human)
-      5. ROUTE_COMPLEX             → near-disabled   (SAM2 too slow on MPS)
-      6. default                   → ROUTE_SIMPLE
-
-    Changes from original:
-      - Face detection is the top-priority signal (no false-positive risk
-        because ImageAnalyzer already guards with face_skin_floor).
-      - SAM2 / ROUTE_COMPLEX is disabled by default (settings.sam2_disabled).
-      - portrait_skin_threshold lowered from 0.08 → 0.06.
-      - graphic_asset_threshold lowered from 70 → 65.
+    Decision Stages:
+      1. Human Frontal Face Detection (ROUTE_PORTRAIT)
+      2. Definitive High Skin Detection (ROUTE_PORTRAIT)
+      3. Text-Heavy/Banner/Poster Detection (ROUTE_GRAPHIC)
+      4. Product/Standalone Object Detection (ROUTE_GRAPHIC)
+      5. Temple/Building/Architectural Scene Detection (ROUTE_SIMPLE)
+      6. Moderate Skin / Portrait Fallback (ROUTE_PORTRAIT)
+      7. Complex/Detail Scene (ROUTE_COMPLEX - if enabled)
+      8. Default Route (ROUTE_SIMPLE)
     """
 
     @staticmethod
     def route(metrics: dict) -> str:
         face_detected = metrics.get("face_detected", False)
-        skin_ratio = metrics.get("skin_ratio", 0.0)
+        skin_ratio = metrics.get("skin_ratio", 0.0)  # Robust skin ratio
+        skin_ratio_robust = metrics.get("skin_ratio_robust", skin_ratio)
+        
         graphic_score = metrics.get("graphic_score", 0.0)
         coverage = metrics.get("coverage", 0.0)
         complexity = metrics.get("complexity", 0.0)
+        edge_density = metrics.get("edge_density", 0.0)
+        
+        # New features
+        text_count = metrics.get("text_count", 0)
+        edge_dispersion_std = metrics.get("edge_dispersion_std", 0.0)
+        largest_contour_ratio = metrics.get("largest_contour_ratio", 0.0)
 
-        # ── Rule 1: Face detected → always portrait ────────────────────────
+        # ── Stage 1: Frontal Face → ROUTE_PORTRAIT ─────────────────────────
+        # Note: FaceDetector is already validated by robust skin floor in ImageAnalyzer.
         if face_detected:
             print(f"[Router] Face detected → ROUTE_PORTRAIT")
             return "ROUTE_PORTRAIT"
 
-        # ── Rule 2: High skin ratio → definitive human ─────────────────────
-        if skin_ratio > 0.35:
-            print(f"[Router] Override: High skin_ratio ({skin_ratio:.4f}) → ROUTE_PORTRAIT")
+        # ── Stage 2: Definitive Skin & Low Graphic → ROUTE_PORTRAIT ────────
+        # Large human skin regions (like limbs, headless/tilted portraits).
+        # We ensure it's not a highly graphic image.
+        if skin_ratio_robust > 0.25 and graphic_score < 60.0:
+            print(f"[Router] Definitive skin ratio ({skin_ratio_robust:.4f}) and low graphic score → ROUTE_PORTRAIT")
             return "ROUTE_PORTRAIT"
 
-        # ── Rule 3: Weighted graphic confidence (penalised by skin) ────────
-        graphic_confidence = graphic_score - (skin_ratio * 100.0)
+        # ── Stage 3: Text-Heavy/Poster/Banner → ROUTE_GRAPHIC ──────────────
+        # Word-like text blocks indicate graphics, logos, banners, or poster assets.
+        if text_count >= settings.text_count_threshold:
+            print(f"[Router] Text-heavy asset detected (text_count={text_count}) → ROUTE_GRAPHIC")
+            return "ROUTE_GRAPHIC"
 
+        # ── Stage 4: Standalone Product / Logo → ROUTE_GRAPHIC ─────────────
+        # Standalone products are characterized by:
+        # - High largest contour ratio (dominant single foreground object)
+        # - Edges concentrated in center (high dispersion std)
+        # - Low/medium robust skin (not human)
+        # - Highly graphic color quantization or strong graphic_score
+        if (
+            largest_contour_ratio > settings.product_contour_ratio_min
+            and edge_dispersion_std > 0.12
+            and skin_ratio_robust < settings.robust_skin_threshold
+            and (graphic_score > settings.graphic_asset_threshold or (graphic_score > 40.0 and text_count >= 1))
+        ):
+            print(
+                f"[Router] Standalone product detected: "
+                f"largest_contour_ratio={largest_contour_ratio:.4f}, "
+                f"edge_dispersion_std={edge_dispersion_std:.4f}, "
+                f"graphic_score={graphic_score:.1f} → ROUTE_GRAPHIC"
+            )
+            return "ROUTE_GRAPHIC"
+
+        # Fallback graphic routing for general high graphic confidence
+        graphic_confidence = graphic_score - (skin_ratio_robust * 100.0)
         if graphic_confidence > settings.graphic_asset_threshold:
             print(f"[Router] Graphic confidence ({graphic_confidence:.1f}) → ROUTE_GRAPHIC")
             return "ROUTE_GRAPHIC"
 
-        # ── Rule 4: Moderate skin → portrait ───────────────────────────────
-        if skin_ratio > settings.portrait_skin_threshold:
-            print(f"[Router] Moderate skin_ratio ({skin_ratio:.4f}) → ROUTE_PORTRAIT")
+        # ── Stage 5: Temple / Building / Architecture → ROUTE_SIMPLE ───────
+        # Architecture is characterized by:
+        # - High edge density (lots of structural details)
+        # - Uniform, non-centered dispersion (low edge dispersion standard deviation)
+        # We permit higher skin ratios if the structural confidence is extreme.
+        is_architecture = False
+        if edge_density >= settings.architecture_edge_density_min and edge_dispersion_std <= settings.architecture_dispersion_max:
+            if skin_ratio_robust < settings.robust_skin_threshold:
+                is_architecture = True
+            elif edge_density > 0.12 and edge_dispersion_std < 0.10 and skin_ratio_robust < 0.25:
+                print(f"[Router] High structural complexity overrides skin_ratio_robust ({skin_ratio_robust:.4f})")
+                is_architecture = True
+
+        if is_architecture:
+            print(
+                f"[Router] Architectural scene / Temple detected: "
+                f"edge_density={edge_density:.4f}, "
+                f"edge_dispersion_std={edge_dispersion_std:.4f} → ROUTE_SIMPLE"
+            )
+            return "ROUTE_SIMPLE"
+
+        # ── Stage 6: Moderate Skin / Portrait Fallback → ROUTE_PORTRAIT ────
+        # Catch portraits with tilted faces, profile views, or partial bodies
+        if skin_ratio_robust > settings.portrait_skin_threshold:
+            print(f"[Router] Moderate skin_ratio_robust ({skin_ratio_robust:.4f}) → ROUTE_PORTRAIT")
             return "ROUTE_PORTRAIT"
 
-        # ── Rule 5: ROUTE_COMPLEX (near-disabled; SAM2 too slow on MPS) ───
+        # ── Stage 7: ROUTE_COMPLEX (SAM2 if enabled) ───────────────────────
         if (
             not settings.sam2_disabled
             and complexity > settings.sam2_complexity_threshold
@@ -60,6 +113,7 @@ class SmartRouter:
             print(f"[Router] High complexity/coverage → ROUTE_COMPLEX")
             return "ROUTE_COMPLEX"
 
-        # ── Default ────────────────────────────────────────────────────────
+        # ── Stage 8: Default Route → ROUTE_SIMPLE ──────────────────────────
+        # Best fallback for general objects, pets, animals, and natural scenes.
         print(f"[Router] Default → ROUTE_SIMPLE")
         return "ROUTE_SIMPLE"

@@ -1,23 +1,20 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, status
-from fastapi.responses import StreamingResponse
-import io
+from fastapi.responses import Response
 import time
 import logging
 
 from services.main_bg_service import BackgroundRemovalService, PerformanceTracker
 from utils.file_helper import validate_file, get_file_bytes, FileValidationError
 
-
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["background-removal"])
 
-
-@router.post("/remove-bg", response_class=StreamingResponse)
+@router.post("/remove-bg", response_class=Response)
 async def remove_background(
     file: UploadFile = File(...),
     allowed_extensions: list[str] = ["png", "jpg", "jpeg", "webp"],
     max_size: int = 12582912
-) -> StreamingResponse:
+) -> Response:
     """
     Remove background from an uploaded image.
     
@@ -69,12 +66,14 @@ async def remove_background(
 
     PerformanceTracker().record(processing_time, api_time)
 
-    return StreamingResponse(
-        iter([result_bytes]),
+    return Response(
+        content=result_bytes,
         media_type="image/png",
-        headers={"Content-Disposition": "attachment; filename=output.png"}
+        headers={
+            "Content-Disposition": "attachment; filename=output.png",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
     )
-
 
 @router.get("/health")
 async def health_check() -> dict:
