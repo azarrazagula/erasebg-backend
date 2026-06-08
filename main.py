@@ -76,6 +76,15 @@ async def root() -> dict[str, Any]:
     }
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Health check endpoint for deployment monitoring."""
+    return {
+        "status": "ok",
+        "model": "rembg"
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     
