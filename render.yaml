@@ -11,4 +11,6 @@ services:
         value: INFO
       - key: PRELOAD_MODELS_ON_STARTUP
         value: "false"
+      - key: WARMUP_ON_STARTUP
+        value: "false"
     plan: free
