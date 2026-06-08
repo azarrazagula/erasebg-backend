@@ -3,7 +3,7 @@ services:
     name: erasebg-backend
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port 8000"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: FRONTEND_URL
         value: https://erasebg-frontend.vercel.app

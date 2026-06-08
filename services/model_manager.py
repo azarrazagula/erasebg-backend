@@ -3,9 +3,7 @@ import asyncio
 import threading
 
 import numpy as np
-import torch
 from PIL import Image
-from rembg import new_session, remove
 
 
 class ModelManager:
@@ -37,16 +35,23 @@ class ModelManager:
         self._sessions: dict = {}
         self._sam_predictor = None
         self._sam_lock = asyncio.Lock()
-
-        # Device selection (CUDA > MPS > CPU)
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        elif torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        else:
-            self.device = torch.device("cpu")
+        self.device = self._detect_device()
 
         print(f"[ModelManager] Using device: {self.device}")
+
+    @staticmethod
+    def _detect_device():
+        """Detect best device; torch is optional (only needed for SAM2)."""
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+            if torch.backends.mps.is_available():
+                return torch.device("mps")
+            return torch.device("cpu")
+        except ImportError:
+            return "cpu"
 
     # ── Startup preloading & warmup ─────────────────────────────────────────
 
@@ -72,6 +77,8 @@ class ModelManager:
         MPS kernel compilation.  This eliminates the 15-30s JIT cold-start
         that otherwise hits the first real request.
         """
+        from rembg import remove
+
         dummy = Image.new("RGB", (256, 256), (128, 128, 128))
         for model_name, session in self._sessions.items():
             print(f"[ModelManager] Warming up: {model_name}...")
@@ -87,6 +94,8 @@ class ModelManager:
     def get_birefnet_session(self, model_name: str):
         """Return (and lazily load) a rembg session for the given model."""
         if model_name not in self._sessions:
+            from rembg import new_session
+
             print(f"[ModelManager] Loading BiRefNet model: {model_name}")
 
             # Note: CoreMLExecutionProvider causes ANECompilerService hangs on Apple Silicon
@@ -211,8 +220,12 @@ class ModelManager:
         Release unused MPS memory.  Call after each inference to prevent
         fragmentation on long-running processes.
         """
-        if self.device.type == "mps":
-            try:
-                torch.mps.empty_cache()
-            except Exception:
-                pass  # Available from PyTorch 2.0; safe to ignore if older
+        device_type = getattr(self.device, "type", self.device)
+        if device_type != "mps":
+            return
+        try:
+            import torch
+
+            torch.mps.empty_cache()
+        except Exception:
+            pass  # torch optional; safe to ignore if unavailable
