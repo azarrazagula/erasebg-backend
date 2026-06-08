@@ -10,7 +10,7 @@ from config import settings
 from routes.remove_bg import router as bg_router
 from services.model_manager import ModelManager
 
-
+# Build trigger: force redeploy with health endpoint
 logging.basicConfig(
     level=settings.log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
