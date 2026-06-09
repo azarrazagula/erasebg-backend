@@ -24,9 +24,9 @@ COPY --chown=user:user . .
 # Download models during build time so they are baked into the Docker image
 # This prevents the 1GB Hugging Face repo limit issue and avoids runtime downloads!
 RUN mkdir -p model_files && \
-    wget -qO model_files/birefnet-general.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet-general.onnx && \
-    wget -qO model_files/birefnet-portrait.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/birefnet-portrait.onnx && \
-    wget -qO model_files/bria-rmbg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/bria-rmbg.onnx && \
+    wget -qO model_files/birefnet-general.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-epoch_244.onnx && \
+    wget -qO model_files/birefnet-portrait.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-portrait-epoch_150.onnx && \
+    wget -qO model_files/bria-rmbg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/bria-rmbg-2.0.onnx && \
     wget -qO model_files/isnet-general-use.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx && \
     wget -qO model_files/u2net.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx && \
     wget -qO model_files/u2net_human_seg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx
