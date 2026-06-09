@@ -1,0 +1,54 @@
+name: Sync HF Space on Push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hf-space/**"
+
+jobs:
+  sync-to-hf-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Sync hf-space/ to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          local_dir = "hf-space"
+          repo_id = "azaribrahim/erasebg-inference"
+
+          skip = {".env", "model_files", "__pycache__", ".DS_Store"}
+
+          for root, dirs, files in os.walk(local_dir):
+              dirs[:] = [d for d in dirs if d not in skip]
+              for file in files:
+                  if file in skip or file.endswith(".pyc"):
+                      continue
+                  full_path = os.path.join(root, file)
+                  rel_path = os.path.relpath(full_path, local_dir)
+                  print(f"Uploading: {rel_path}")
+                  api.upload_file(
+                      path_or_fileobj=full_path,
+                      path_in_repo=rel_path,
+                      repo_id=repo_id,
+                      repo_type="space"
+                  )
+
+          print("All files synced to HF Space!")
+          EOF
