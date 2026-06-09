@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+rembg[cpu]==2.0.61
+Pillow==11.3.0
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pydantic==2.10.0
+pydantic-settings==2.7.0
+opencv-python-headless
+numpy

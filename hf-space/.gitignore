@@ -1,0 +1,12 @@
+# Exclude large model files from git
+# These must be uploaded manually to Hugging Face
+model_files/*.onnx
+model_files/*.pt
+model_files/*.pth
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/

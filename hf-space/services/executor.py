@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 from rembg import remove
 
-from services.model_manager import ModelManager
+from models.loader import ModelLoader
 from services.resolution_manager import ResolutionManager
 from services.image_re_analyzer import SmallComponentRecovery
 
@@ -23,8 +23,8 @@ class SegmentationPipeline:
       4. SAM2 is preserved but rarely used (controlled by router).
     """
 
-    def __init__(self, model_manager: ModelManager):
-        self.mm = model_manager
+    def __init__(self, model_loader: ModelLoader):
+        self.mm = model_loader
 
     async def run_birefnet(
         self,
@@ -36,7 +36,7 @@ class SegmentationPipeline:
         Runs inference on the provided image using BiRefNet.
         Returns: (low_res_rgba_output, model_name, inference_time_seconds)
         """
-        session = self.mm.get_birefnet_session(model_name)
+        session = self.mm.get_session(model_name)
 
         matting_params = {"alpha_matting": False}
         matting_params.update(kwargs)
@@ -52,7 +52,7 @@ class SegmentationPipeline:
         elapsed = time.perf_counter() - start
 
         # Free MPS memory after inference
-        self.mm._clear_mps_cache()
+        self.mm.clear_mps_cache()
 
         return output_img, model_name, elapsed
 
