@@ -18,7 +18,7 @@ WORKDIR /app
 COPY --chown=user:user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (cache-bust: v2)
 COPY --chown=user:user . .
 
 # Download models during build time so they are baked into the Docker image
