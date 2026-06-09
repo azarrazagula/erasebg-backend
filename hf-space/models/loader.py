@@ -105,6 +105,7 @@ class ModelLoader:
             try:
                 remove(dummy, session=session, alpha_matting=False)
             except Exception as exc:
+                logger.error(f"Warmup failed for {model_name}: {exc}")
         logger.info("Warmup complete.")
 
     def clear_mps_cache(self):
