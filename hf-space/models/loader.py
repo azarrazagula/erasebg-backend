@@ -38,8 +38,21 @@ class ModelLoader:
         if model_name not in self._sessions:
             # FREE MEMORY: Only keep ONE model loaded at a time to prevent 16GB OOM on HF Space
             if len(self._sessions) > 0:
+                import gc
                 logger.info("Freeing previously loaded models to conserve memory...")
+                # Explicit delete + gc.collect() ensures memory is released BEFORE loading new model.
+                # dict.clear() alone does NOT guarantee immediate RAM free in Python.
+                old_sessions = list(self._sessions.values())
                 self._sessions.clear()
+                for s in old_sessions:
+                    try:
+                        del s.inner_session
+                    except Exception:
+                        pass
+                    del s
+                del old_sessions
+                gc.collect()
+                logger.info("Memory freed. Loading new model...")
 
             if not verify_model_exists(model_name):
                 logger.error(f"Missing local model file for {model_name}.")
