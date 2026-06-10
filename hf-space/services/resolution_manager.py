@@ -34,7 +34,7 @@ import cv2
 from PIL import Image
 from typing import Tuple
 
-from config import settings
+from config.settings import settings
 
 
 class ResolutionManager:
