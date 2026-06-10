@@ -1,28 +1,29 @@
 FROM python:3.9-slim
 
-# Install system dependencies required for OpenCV and other libraries
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Create user to run the app (Hugging Face Spaces requirement)
+# Create user (Hugging Face requirement)
 RUN useradd -m -u 1000 user
+
+# Create app dir and set ownership BEFORE switching user
+RUN mkdir /app && chown user:user /app
+
 USER user
 ENV PATH="/home/user/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Copy requirements and install
+# Step 1: Copy and install requirements (cached unless requirements.txt changes)
 COPY --chown=user:user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code (cache-bust: v2)
-COPY --chown=user:user . .
-
-# Download models during build time so they are baked into the Docker image
-# This prevents the 1GB Hugging Face repo limit issue and avoids runtime downloads!
+# Step 2: Download models BEFORE copying app code
+# This means model downloads are CACHED even when Python code changes!
 RUN mkdir -p model_files && \
     wget -qO model_files/birefnet-general.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-epoch_244.onnx && \
     wget -qO model_files/birefnet-portrait.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-portrait-epoch_150.onnx && \
@@ -31,7 +32,10 @@ RUN mkdir -p model_files && \
     wget -qO model_files/u2net.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx && \
     wget -qO model_files/u2net_human_seg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx
 
-# Expose port 7860 which is the default for Hugging Face Spaces
+# Step 3: Copy application code LAST (changes frequently, but no model re-download needed)
+COPY --chown=user:user . .
+
+# Expose port for Hugging Face Spaces
 EXPOSE 7860
 
 # Run the FastAPI app
