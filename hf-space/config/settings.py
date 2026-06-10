@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     graphic_max_resolution: int = 1280
     simple_max_resolution: int = 1024
 
-    preload_models_on_startup: bool = True
-    warmup_on_startup: bool = True
+    preload_models_on_startup: bool = False
+    warmup_on_startup: bool = False
 
     face_detection_enabled: bool = True
     face_detection_min_size: int = 30

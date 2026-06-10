@@ -36,6 +36,11 @@ class ModelLoader:
     def get_session(self, model_name: str):
         """Lazy loads and caches the rembg session for the requested model."""
         if model_name not in self._sessions:
+            # FREE MEMORY: Only keep ONE model loaded at a time to prevent 16GB OOM on HF Space
+            if len(self._sessions) > 0:
+                logger.info("Freeing previously loaded models to conserve memory...")
+                self._sessions.clear()
+
             if not verify_model_exists(model_name):
                 logger.error(f"Missing local model file for {model_name}.")
                 raise FileNotFoundError(
@@ -48,9 +53,16 @@ class ModelLoader:
 
             # Use CPUExecutionProvider to avoid Apple Silicon JIT hangs, 
             # and as safe default for hugging face space unless specific hardware is available.
+            import onnxruntime as ort
+            sess_opts = ort.SessionOptions()
+            sess_opts.enable_cpu_mem_arena = False
+            sess_opts.intra_op_num_threads = 4
+            sess_opts.inter_op_num_threads = 4
+
             session = new_session(
                 model_name,
-                providers=["CPUExecutionProvider"]
+                providers=["CPUExecutionProvider"],
+                sess_options=sess_opts
             )
             
             # Monkeypatch predict to add granular timing logs
