@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
-from api.health import router as health_router
+from api.server_info import router as server_info_router
+from api.wake_check import router as wake_check_router
 from api.inference import router as inference_router
 from models.loader import ModelLoader
 
@@ -50,7 +51,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health_router)
+app.include_router(server_info_router)
+app.include_router(wake_check_router)
 app.include_router(inference_router)
 
 if __name__ == "__main__":

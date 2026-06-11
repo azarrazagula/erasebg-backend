@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
 from api.remove_bg import router as bg_router
-from api.health import router as health_router
+from api.server_info import router as server_info_router
+from api.wake_check import router as wake_check_router
 
 logging.basicConfig(
     level=settings.log_level,
@@ -33,7 +34,8 @@ app.add_middleware(
     max_age=600
 )
 
-app.include_router(health_router)
+app.include_router(server_info_router)
+app.include_router(wake_check_router)
 app.include_router(bg_router)
 
 if __name__ == "__main__":
