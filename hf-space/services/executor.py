@@ -2,11 +2,11 @@ import asyncio
 import time
 import numpy as np
 from PIL import Image
-from rembg import remove
+from rembg import remove        # BiRefNet inference library
 
 from models.loader import ModelLoader
-from services.resolution_manager import ResolutionManager
-from services.image_re_analyzer import SmallComponentRecovery
+from services.resolution_manager import ResolutionManager       # Resize logic
+from services.image_re_analyzer import SmallComponentRecovery   # Post-processing
 
 
 class SegmentationPipeline:
@@ -24,7 +24,7 @@ class SegmentationPipeline:
     """
 
     def __init__(self, model_loader: ModelLoader):
-        self.mm = model_loader
+        self.mm = model_loader  # ModelLoader singleton reference
 
     async def run_birefnet(
         self,
@@ -36,13 +36,15 @@ class SegmentationPipeline:
         Runs inference on the provided image using BiRefNet.
         Returns: (low_res_rgba_output, model_name, inference_time_seconds)
         """
+        # ONNX session எடு (cache-ல இருந்தா reuse, இல்லன்னா load)
         session = self.mm.get_session(model_name)
 
+        # alpha_matting=False default — GrabCut CPU penalty avoid
         matting_params = {"alpha_matting": False}
-        matting_params.update(kwargs)
+        matting_params.update(kwargs)   # Caller-ல override பண்ணினா allow
 
         start = time.perf_counter()
-        # remove() blocking call runs in thread pool
+        # remove() blocking call — asyncio thread pool-ல run பண்ணு (event loop block ஆகாது)
         output_img = await asyncio.to_thread(
             remove,
             image,
@@ -51,7 +53,7 @@ class SegmentationPipeline:
         )
         elapsed = time.perf_counter() - start
 
-        # Free MPS memory after inference
+        # Apple Silicon MPS memory free பண்ணு (torch.mps.empty_cache())
         self.mm.clear_mps_cache()
 
         return output_img, model_name, elapsed
@@ -59,30 +61,32 @@ class SegmentationPipeline:
     async def run_sam2_complex(self, image: Image.Image) -> tuple[Image.Image, str, float]:
         """
         Runs SAM2 + BiRefNet-general. Very slow on MPS (20s+).
+        SAM2 center-point prompt மூலம் foreground mask எடுத்து BiRefNet-க்கு feed பண்ணும்.
         """
         predictor = await self.mm.get_sam2_predictor()
-        cv_img = np.array(image.convert("RGB"))
+        cv_img = np.array(image.convert("RGB"))  # PIL → numpy BGR
 
         def _predict():
             predictor.set_image(cv_img)
             h, w = cv_img.shape[:2]
-            point_coords = np.array([[w // 2, h // 2]])
-            point_labels = np.array([1])
+            point_coords = np.array([[w // 2, h // 2]])  # Image center point
+            point_labels = np.array([1])                  # 1 = foreground
             masks, scores, _ = predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
-                multimask_output=False
+                multimask_output=False    # Single mask மட்டும்
             )
             return masks[0]
 
         start = time.perf_counter()
         mask = await asyncio.to_thread(_predict)
 
+        # SAM2 mask → alpha channel-ஆ convert
         mask_img = Image.fromarray((mask * 255).astype(np.uint8)).convert("L")
         image_with_sam_mask = image.copy().convert("RGBA")
-        image_with_sam_mask.putalpha(mask_img)
+        image_with_sam_mask.putalpha(mask_img)  # SAM2 mask-ஐ alpha-ஆ set
 
-        # Run birefnet-general on the SAM2 result
+        # SAM2 result-ஐ BiRefNet-general-க்கு refine பண்ண pass பண்ணு
         output_img, model_name, _ = await self.run_birefnet(image_with_sam_mask, "birefnet-general")
         total_elapsed = time.perf_counter() - start
         return output_img, "sam2+birefnet-general", total_elapsed
@@ -100,35 +104,38 @@ class SegmentationPipeline:
         import time
         t_start = time.perf_counter()
 
-        # 1. Resize for inference
+        # Step 1: Inference-க்கு ஏத்த size-க்கு resize (4K → 1024px)
+        # original_image full res, infer_image small res
         infer_image, orig_size = ResolutionManager.resize_for_inference(
             original_image, route
         )
         t_resize = time.perf_counter()
         print(f"[Timing] Resize Time: {t_resize - t_start:.4f}s")
 
-        # 2. Run Inference
+        # Step 2: Route-க்கு ஏத்த model run பண்ணு
         if route == "ROUTE_GRAPHIC":
-            # BUGFIX: alpha_matting=False for graphics. 
-            # Original had True, causing full-res GrabCut on CPU (50s penalty).
+            # alpha_matting=False explicitly — graphic-க்கு GrabCut பண்றது wrong
             infer_out, model_name, elapsed = await self.run_birefnet(
                 infer_image, "birefnet-general", alpha_matting=False
             )
         elif route == "ROUTE_PORTRAIT":
+            # Portrait model — hair/skin edge detail better
             infer_out, model_name, elapsed = await self.run_birefnet(
                 infer_image, "birefnet-portrait"
             )
         elif route == "ROUTE_COMPLEX":
+            # SAM2 + BiRefNet combo (rarely triggered)
             infer_out, model_name, elapsed = await self.run_sam2_complex(infer_image)
         else:
-            # ROUTE_SIMPLE
+            # ROUTE_SIMPLE — general model, animals, objects, nature
             infer_out, model_name, elapsed = await self.run_birefnet(
                 infer_image, "birefnet-general"
             )
         t_infer = time.perf_counter()
         print(f"[Timing] Inference Time: {t_infer - t_resize:.4f}s")
 
-        # 3. Upscale mask and composite with original image
+        # Step 3: Low-res mask-ஐ original resolution-க்கு upscale + composite
+        # infer_out = small RGBA, original_image = full res → final = full res RGBA
         final_out = await asyncio.to_thread(
             ResolutionManager.upscale_mask_to_original,
             infer_out,
@@ -138,7 +145,8 @@ class SegmentationPipeline:
         t_upscale = time.perf_counter()
         print(f"[Timing] Mask Upscale Time: {t_upscale - t_infer:.4f}s")
 
-        # 4. Small Component Recovery (runs on final upscaled mask)
+        # Step 4: Graphic route மட்டும் — missed small components recover பண்ணு
+        # (logos, dots, thin lines BiRefNet miss பண்ணியிருக்கும்)
         if route == "ROUTE_GRAPHIC":
             final_out = await asyncio.to_thread(
                 SmallComponentRecovery.recover, original_image, final_out
